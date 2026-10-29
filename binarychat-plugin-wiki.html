@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BinaryChat Plugin Wiki</title>
+<style>
+:root{--bg:#fff;--fg:#1d2433;--mut:#5b6578;--card:#f4f6fa;--bd:#d9dfe9;--ac:#2456c7;--code:#eef1f7;--warn:#fff4d6;--warnb:#e0b440;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171f;--fg:#e4e8f0;--mut:#9aa4b8;--card:#1c212c;--bd:#2d3444;--ac:#7ea6ff;--code:#222939;--warn:#3a3217;--warnb:#a88a2c}}
+:root[data-theme="dark"]{--bg:#14171f;--fg:#e4e8f0;--mut:#9aa4b8;--card:#1c212c;--bd:#2d3444;--ac:#7ea6ff;--code:#222939;--warn:#3a3217;--warnb:#a88a2c}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,Segoe UI,sans-serif;display:flex;min-height:100vh}
+nav{width:230px;flex:none;background:var(--card);border-right:1px solid var(--bd);padding:16px;position:sticky;top:0;align-self:flex-start;height:100vh;overflow:auto;box-sizing:border-box}
+nav h2{font-size:15px;margin:0 0 8px}nav a{display:block;color:var(--fg);text-decoration:none;padding:3px 8px;border-radius:5px;font-size:14px}nav a:hover{background:var(--code);color:var(--ac)}
+nav .g{font-size:11px;text-transform:uppercase;color:var(--mut);margin:12px 8px 2px}
+main{flex:1;min-width:0;max-width:920px;padding:24px 32px 60px}
+h1{margin-top:0}h2{border-bottom:1px solid var(--bd);padding-bottom:4px;margin-top:40px}h3{margin-top:26px}
+code,pre{font-family:Consolas,Menlo,monospace;font-size:13px}code{background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:12px;border-radius:8px;overflow-x:auto}pre code{padding:0;background:none}
+.t{overflow-x:auto}table{border-collapse:collapse;width:100%;margin:10px 0}th,td{border:1px solid var(--bd);padding:6px 9px;text-align:left;vertical-align:top;font-size:14px}th{background:var(--card)}
+.note{background:var(--warn);border-left:4px solid var(--warnb);padding:8px 12px;border-radius:4px;margin:12px 0}
+.info{background:var(--card);border-left:4px solid var(--ac);padding:8px 12px;border-radius:4px;margin:12px 0}
+.badge{display:inline-block;font-size:11px;padding:0 7px;border-radius:9px;background:var(--ac);color:var(--bg);margin-left:4px}
+a{color:var(--ac)}
+@media(max-width:760px){nav{display:none}main{padding:16px}}
+</style></head><body>
+<nav><h2>BinaryChat Plugin Wiki</h2>
+<a href="#overview">Overview</a><a href="#files">Source files</a><a href="#lifecycle">Lifecycle</a><a href="#settings">PluginSettings.h</a>
+<div class="g">Callbacks</div><a href="#hooks">Hooks</a><a href="#enums">Enumeration callbacks</a>
+<div class="g">Calling the host</div><a href="#rev1">Revision 1</a><a href="#rev2">Revision 2</a><a href="#rev3">Revision 3</a><a href="#rev4">Revision 4</a><a href="#version">Version API</a>
+<div class="g">Reference</div><a href="#types">Types &amp; enums</a><a href="#config">ConfigurationSetting</a><a href="#structs">PluginInformation</a><a href="#abi">ABI guards</a><a href="#gotchas">Gotchas</a><a href="#recipes">Recipes</a></nav>
+<main>
+<h1>BinaryChat Plugin API</h1>
+<p>A C++ plugin template for <b>BinaryChat.exe</b>, a Battle.net chat bot. A plugin is a DLL that exports one function (<code>PluginMain</code>, exported as <code>SetInterfaceInformation</code>). The host passes a table of function pointers in, and the plugin hands back callbacks (hooks) the host calls on events. This page summarizes everything in the supplied headers and template.</p>
+
+<h2 id="overview">Overview</h2>
+<table><tr><th>Direction</th><th>Mechanism</th><th>Where</th></tr>
+<tr><td>Host → plugin</td><td>Five <b>hooks</b> (message, connection, timer, command, event) plus three <b>enumeration callbacks</b> (channel, filters, loaded plugins)</td><td><code>HookManager</code> / <code>Plugin</code></td></tr>
+<tr><td>Plugin → host</td><td>Function pointers in <code>PluginInformation</code> (rev 1–4), wrapped by the global <code>API</code> object</td><td><code>BinaryChatAPIManager</code></td></tr>
+<tr><td>Plugin → host (extra)</td><td>Three procs fetched with <code>GetProcAddress</code> from BinaryChat.exe (version/config)</td><td><code>BinaryChatAPI::*Proc</code></td></tr></table>
+<p>Two globals exist: <code>Plugin PluginInstance</code> and <code>BinaryChatAPIManager API</code>. Hooks are static <code>__stdcall</code> trampolines that cast <code>lParam</code> back to the instance and call a virtual method you override in <code>Plugin</code>.</p>
+
+<h2 id="files">Source files</h2>
+<table><tr><th>File</th><th>Purpose</th></tr>
+<tr><td><code>BCPlugin.h</code></td><td>The ABI contract: enums, callback typedefs, <code>PluginInformation</code> 1–4, ABI <code>static_assert</code>s, <code>PluginMain</code> declaration</td></tr>
+<tr><td><code>PluginSettings.h</code></td><td>Compile-time switches for hooks, Version API, and revision range; declares <code>PluginInstance</code> and <code>API</code></td></tr>
+<tr><td><code>BinaryChatAPIManager.h/.cpp</code></td><td>Class <code>API</code>: stores proc pointers, exposes wrapper methods, static enum trampolines</td></tr>
+<tr><td><code>HookManager.h/.cpp</code></td><td>Abstract base: static hook trampolines, pure virtuals, <code>m_PluginInstance</code>, <code>m_Event</code></td></tr>
+<tr><td><code>Plugin.h/.cpp</code></td><td><b>Your code goes here.</b> Overrides of every virtual, plus <code>Initialize()</code>/<code>Terminate()</code></td></tr>
+<tr><td><code>PluginMain.cpp</code></td><td><code>DllMain</code>, <code>PluginMain</code> (revision detection, filling <code>API</code>, installing hooks)</td></tr>
+<tr><td><code>PluginExports.def</code></td><td>Export definition (see the header note: export as <code>SetInterfaceInformation</code>)</td></tr>
+<tr><td><code>Template.slnx / .vcxproj / .filters / .user</code></td><td>Visual Studio solution and project</td></tr></table>
+
+<h2 id="lifecycle">Lifecycle</h2>
+<ol>
+<li><b>DLL load</b>: <code>DllMain(DLL_PROCESS_ATTACH)</code> calls <code>DisableThreadLibraryCalls</code>. Nothing else; the default case is <code>__assume(0)</code>, which is valid only because thread notifications are disabled.</li>
+<li><b>Host calls <code>PluginMain(Information)</code></b>:
+ <ol><li><code>ZeroMemory(&amp;API)</code> so absent revisions are null.</li>
+ <li>Revision is derived from <code>Information-&gt;Size</code> (≥ sizeof Info4 → 4, Info3 → 3, Info2 → 2, else 1), limited by <code>HIGHEST_REVISION</code>. If below <code>LOWEST_REVISION</code>, returns <code>FALSE</code> and the plugin isn't loaded.</li>
+ <li>Rev 1 pointers always copied; rev 2–4 pointers only when that revision is present.</li>
+ <li>Version API procs looked up in <code>BinaryChat.exe</code> (if <code>BINARYCHATAPI_ENABLED</code>).</li>
+ <li><code>PluginInstance.m_PluginInstance</code> = the plugin's HINSTANCE from the host.</li>
+ <li>Each enabled hook and its <code>lParam</code> (<code>&amp;PluginInstance</code>) is written back into <code>Information</code>. With <code>EVENTHOOK_ENABLED</code>, the host's <code>PluginEvent</code> handle is saved to <code>m_Event</code>.</li>
+ <li>Returns <code>Plugin::Initialize()</code>.</li></ol></li>
+<li><b>Running</b>: host invokes your hooks; you call <code>API.*</code>.</li>
+<li><b>Unload</b>: <code>DLL_PROCESS_DETACH</code> calls <code>Terminate()</code> only if <code>Initialize()</code> returned true.</li></ol>
+<div class="info"><code>Initialize()</code>/<code>Terminate()</code> replace the constructor/destructor. Returning <code>False</code> from <code>Initialize</code> aborts loading and <code>Terminate</code> is not called.</div>
+
+<pre><code>// Plugin.cpp: typical Initialize / Terminate
+Bool32 Plugin::Initialize()
+{
+	if (API.Revision() &lt; 3)               // e.g. we rely on GetWindow
+		return PluginAPI::False;           // abort load; Terminate() won't run
+	API.SetOutputColor(PluginAPI::Green);
+	API.WriteOutputString("MyPlugin loaded");
+	return PluginAPI::True;
+}
+
+void Plugin::Terminate() { /* release resources; runs inside DLL_PROCESS_DETACH */ }</code></pre>
+
+<h2 id="settings">PluginSettings.h</h2>
+<table><tr><th>Macro</th><th>Effect</th></tr>
+<tr><td><code>MESSAGEHOOK_ENABLED</code></td><td>Compiles in and installs <code>MessageHook</code></td></tr>
+<tr><td><code>CONNECTIONHOOK_ENABLED</code></td><td>…<code>ConnectionHook</code></td></tr>
+<tr><td><code>PLUGINTIMER_ENABLED</code></td><td>…<code>PluginTimer</code></td></tr>
+<tr><td><code>COMMANDHOOK_ENABLED</code></td><td>…<code>CommandHook</code></td></tr>
+<tr><td><code>EVENTHOOK_ENABLED</code></td><td>…<code>EventHook</code> and the <code>m_Event</code> handle</td></tr>
+<tr><td><code>BINARYCHATAPI_ENABLED</code></td><td>Version/config API (<code>GetBotVersion</code>, <code>GetBotVersionEx</code>, <code>QueryConfigurationSetting</code>)</td></tr>
+<tr><td><code>LOWEST_REVISION</code> (1)</td><td>Host older than this → plugin refuses to load</td></tr>
+<tr><td><code>HIGHEST_REVISION</code> (4)</td><td>Highest revision the plugin uses; strips rev 2–4 code below it. <code>API.Revision()</code> is guaranteed in [LOWEST, HIGHEST]</td></tr></table>
+<p>Set a hook switch to false when unused: the host then never calls into you for it.</p>
+
+<h2 id="hooks">Hooks (host calls you)</h2>
+<p>Override these in <code>Plugin</code>. The template bodies return <code>False</code> (timer returns <code>TimeDelay</code>). The meaning of each return value is defined by the host, which these files don't spell out, so check BinaryChat's behavior before relying on one.</p>
+<h3>MessageHook <span class="badge">rev 1</span></h3>
+<pre><code>Bool32 MessageHook(ConnectionInterface Connection, uint8_t MessageId,
+                   const void* MessageData, uint32_t MessageSize);</code></pre>
+<p>Called for protocol messages on a connection: <code>Connection_BNCS</code> (Battle.net chat server), <code>Connection_MCP</code> (realm), <code>Connection_GS</code> (game server). <code>MessageId</code> is the packet ID, <code>MessageData/Size</code> the raw payload. Pair with <code>SetMessage</code>/<code>ClearMessage</code>/<code>IsMessageSet</code> to subscribe to or suppress specific IDs.</p>
+<pre><code>// Initialize(): flag the IDs we care about (0x0F = SID_CHATEVENT)
+API.SetMessage(0x0F);
+
+Bool32 Plugin::MessageHook(PluginAPI::ConnectionInterface c, uint8_t id,
+                           const void* data, uint32_t size)
+{
+	if (c == PluginAPI::Connection_BNCS &amp;&amp; id == 0x0F &amp;&amp; size &gt;= 4) {
+		const auto* p = static_cast&lt;const uint8_t*&gt;(data);
+		// parse p[0 .. size) - data is only valid for the duration of this call
+	}
+	return PluginAPI::False;
+}</code></pre>
+<h3>ConnectionHook <span class="badge">rev 1</span></h3>
+<pre><code>Bool32 ConnectionHook(ConnectionInterface Connection, ConnectionState EventCode, uint64_t PlatformId);</code></pre>
+<p>Connection opened/closed (<code>Connection_Opened</code>/<code>Connection_Closed</code>) for one of the three interfaces. <code>PlatformId</code> is 64-bit.</p>
+<pre><code>Bool32 Plugin::ConnectionHook(PluginAPI::ConnectionInterface c,
+                              PluginAPI::ConnectionState s, uint64_t)
+{
+	if (c == PluginAPI::Connection_BNCS)
+		API.WriteOutputString(s == PluginAPI::Connection_Opened
+			? "Chat server connected" : "Chat server disconnected");
+	return PluginAPI::False;
+}</code></pre>
+<h3>PluginTimer <span class="badge">rev 1</span></h3>
+<pre><code>uint32_t PluginTimer(uint32_t TimeDelay);</code></pre>
+<p>Periodic tick. The return value is a delay (<code>uint32_t</code>); the template returns the incoming <code>TimeDelay</code> unchanged. Presumably the host uses it to schedule the next call, so return a different value to change the interval.</p>
+<pre><code>// Plugin.h: uint32_t m_Ticks = 0;
+uint32_t Plugin::PluginTimer(uint32_t TimeDelay)
+{
+	if (++m_Ticks % 10 == 0)
+		API.QueryChannelInformation();   // results arrive in EnumChannelHook
+	return TimeDelay;                    // keep the host's interval
+}</code></pre>
+<h3>CommandHook <span class="badge">rev 1</span></h3>
+<pre><code>Bool32 CommandHook(const char* Message, const char* SendingUser, Bool32 FromTelnet);</code></pre>
+<p>A bot command received from a chat user, or from the Telnet interface (<code>FromTelnet</code>). Use it to implement custom commands.</p>
+<pre><code>#include &lt;string&gt;
+#include &lt;string_view&gt;
+
+Bool32 Plugin::CommandHook(const char* Message, const char* SendingUser, Bool32 FromTelnet)
+{
+	if (std::string_view{ Message }.starts_with("!hello")) {
+		std::string reply = std::string("Hello, ") + SendingUser;
+		API.QueueChatMessage(reply.data(), PluginAPI::False);  // takes char*, not const
+		return PluginAPI::True;   // convention assumed: True = handled
+	}
+	return PluginAPI::False;
+}</code></pre>
+<h3>EventHook <span class="badge">rev 1</span></h3>
+<pre><code>Bool32 EventHook();   // m_Event is the HANDLE (PluginEvent) the host signals</code></pre>
+<p>Invoked when the plugin's event object is signaled. Use <code>m_Event</code> to wake the plugin from another thread.</p>
+<p><b>Example: worker thread → host thread via <code>PluginEvent</code></b>. The worker queues work and signals <code>m_Event</code>; the host then calls <code>EventHook()</code> on its own thread, where it is safe to use <code>API.*</code>.</p>
+<pre><code>// Plugin.h additions
+#include &lt;mutex&gt;
+#include &lt;queue&gt;
+#include &lt;string&gt;
+#include &lt;thread&gt;
+
+std::jthread m_Worker;
+std::mutex m_Lock;
+std::queue&lt;std::string&gt; m_Pending;
+
+// Plugin.cpp
+Bool32 Plugin::Initialize()
+{
+	m_Worker = std::jthread([this](std::stop_token st) {
+		while (!st.stop_requested()) {
+			std::string line = WaitForSomethingInteresting();   // your blocking source, with a timeout
+			{
+				std::lock_guard g{ m_Lock };
+				m_Pending.push(std::move(line));
+			}
+			SetEvent(m_Event);          // host will now call EventHook()
+		}
+	});
+	return PluginAPI::True;
+}
+
+Bool32 Plugin::EventHook()
+{
+	std::queue&lt;std::string&gt; local;
+	{
+		std::lock_guard g{ m_Lock };
+		local.swap(m_Pending);          // grab everything, release the lock fast
+	}
+	while (!local.empty()) {
+		API.WriteOutputString(local.front().c_str());
+		local.pop();
+	}
+	return PluginAPI::False;
+}</code></pre>
+<div class="note"><b>Shutdown caution.</b> <code>Terminate()</code> runs inside <code>DLL_PROCESS_DETACH</code> under the loader lock. Calling <code>join()</code> there can deadlock, so prefer to request stop and let the worker exit on its own (or stop it earlier, for example from a command). Keep the worker from touching <code>API.*</code> or the DLL after unload.</div>
+
+<h2 id="enums">Enumeration callbacks</h2>
+<p>These fire only as a result of you calling the matching <code>API.Query/Enum*</code> function. The template passes <code>&amp;PluginInstance</code> as <code>lParam</code> and the static trampoline forwards to your virtual. Template bodies return <code>True</code>; presumably <code>True</code> continues the enumeration and <code>False</code> stops it.</p>
+<table><tr><th>Trigger</th><th>Override</th><th>Arguments</th></tr>
+<tr><td><code>API.QueryChannelInformation()</code></td><td><code>EnumChannelHook</code></td><td><code>UniqueName, Statstring, Flags, Ping, Invisible, AccountNumber, RegAuthority</code></td></tr>
+<tr><td><code>API.EnumUserFilters()</code> <span class="badge">rev 4</span></td><td><code>EnumUserFiltersHook</code></td><td><code>Filter</code></td></tr>
+<tr><td><code>API.EnumMessageFilters()</code> <span class="badge">rev 4</span></td><td><code>EnumMessageFiltersHook</code></td><td><code>Filter</code></td></tr>
+<tr><td><code>API.EnumLoadedPlugins()</code> <span class="badge">rev 4</span></td><td><code>EnumLoadedPluginsHook</code></td><td><code>ModuleHandle PluginInst</code></td></tr></table>
+
+<pre><code>// Plugin.h: std::vector&lt;std::string&gt; m_Users;
+m_Users.clear();
+API.QueryChannelInformation();       // synchronously calls EnumChannelHook once per user
+
+Bool32 Plugin::EnumChannelHook(const char* UniqueName, const char*, uint32_t Flags, uint32_t Ping,
+                               Bool32 Invisible, uint32_t, uint32_t)
+{
+	if (!Invisible) m_Users.emplace_back(UniqueName);
+	return PluginAPI::True;           // keep enumerating
+}</code></pre>
+
+<h2>API (you call the host)</h2>
+<p>All calls go through the global <code>API</code>. Methods for revisions 2–4 must only be called when <code>API.Revision()</code> is high enough, otherwise the pointer is null and it will crash.</p>
+<h3 id="rev1">Revision 1: messaging, state, output</h3>
+<div class="t"><table><tr><th>Method</th><th>What it does</th></tr>
+<tr><td><code>SetMessage / ClearMessage / IsMessageSet(id)</code></td><td>Mark, unmark, or test whether a message ID is flagged (controls what reaches your MessageHook)</td></tr>
+<tr><td><code>QueueMessage(id, data, size)</code></td><td>Queue a raw message for sending</td></tr>
+<tr><td><code>QueueChatMessage(char* msg, FixD2Command)</code></td><td>Send chat text; <code>FixD2Command</code> adjusts Diablo II-style commands. Note: non-const <code>char*</code></td></tr>
+<tr><td><code>SendConnectionMessage(conn, id, data, size)</code></td><td>Send a message directly on BNCS/MCP/GS</td></tr>
+<tr><td><code>CloseConnection(conn)</code></td><td>Close one of the connections</td></tr>
+<tr><td><code>QueryStateInformation(StateInformation*)</code></td><td>Fills channel name/flags, unique name, account name, statstring, and per-connection state. Set <code>Size</code> first</td></tr>
+<tr><td><code>QueryChannelInformation()</code></td><td>Enumerate channel users into <code>EnumChannelHook</code></td></tr>
+<tr><td><code>SetOutputColor(color)</code></td><td>Set color for subsequent output</td></tr>
+<tr><td><code>WriteOutputTimestamp()</code></td><td>Write a timestamp to the chat window</td></tr>
+<tr><td><code>WriteOutputString(str)</code></td><td>Write text to the chat window</td></tr></table></div>
+<pre><code>PluginAPI::StateInformation si{};
+si.Size = sizeof(si);                          // required before the call
+if (API.QueryStateInformation(&amp;si)) {
+	API.SetOutputColor(PluginAPI::Yellow);
+	API.WriteOutputTimestamp();
+	API.WriteOutputString(si.ChannelName);
+	if (si.State[PluginAPI::Connection_BNCS] == PluginAPI::Connection_Closed)
+		API.CloseConnection(PluginAPI::Connection_MCP);
+}</code></pre>
+
+<h3 id="rev2">Revision 2</h3>
+<p><code>ProcessBotCommand(const char* Command)</code>: run a bot command as if typed locally.</p>
+<pre><code>if (API.Revision() &gt;= 2)
+	API.ProcessBotCommand("/help");   // goes through the bot's normal command handling</code></pre>
+<h3 id="rev3">Revision 3: registry, window and menu access</h3>
+<table><tr><th>Method</th><th>What it does</th></tr>
+<tr><td><code>GetRegistryPath()</code></td><td>Returns the bot's registry path (<code>const char*</code>)</td></tr>
+<tr><td><code>ResetAwayIdle()</code></td><td>Reset away/idle timers</td></tr>
+<tr><td><code>IsService()</code></td><td>True if the bot is running as a service</td></tr>
+<tr><td><code>GetWindow(BinaryChatWindow)</code></td><td>HWND of a bot window (see enums)</td></tr>
+<tr><td><code>GetMenu(BinaryChatMenu)</code></td><td>HMENU of the main menu or the channel user popup submenu</td></tr></table>
+<pre><code>if (API.Revision() &gt;= 3) {
+	const char* regPath = API.GetRegistryPath();               // per-bot registry location
+	auto hOutput = static_cast&lt;HWND&gt;(API.GetWindow(PluginAPI::ChatOutput));
+	auto hMenu   = static_cast&lt;HMENU&gt;(API.GetMenu(PluginAPI::ChannelUserPopupMenu));
+	AppendMenuW(hMenu, MF_STRING, 0xA000, L"My action");      // choose an ID that won't collide
+	if (!API.IsService()) { /* safe to show UI */ }
+	API.ResetAwayIdle();
+}</code></pre>
+
+<h3 id="rev4">Revision 4: filters, notifications, plugins</h3>
+<table><tr><th>Method</th><th>What it does</th></tr>
+<tr><td><code>IsUserFiltered(user)</code> / <code>IsMessageFiltered(msg)</code></td><td>Test against the bot's filter lists</td></tr>
+<tr><td><code>EnumUserFilters()</code> / <code>EnumMessageFilters()</code></td><td>List filters via callback</td></tr>
+<tr><td><code>AddUserFilter / AddMessageFilter(filter, Save)</code></td><td>Add a filter; <code>Save</code> persists the list</td></tr>
+<tr><td><code>RemoveUserFilter / RemoveMessageFilter(filter, Save)</code></td><td>Remove a filter</td></tr>
+<tr><td><code>API.NotifyMsg(color, user, fmt, ...)</code></td><td>printf-style notification in the UI. <b>Public member function pointer, <code>__cdecl</code></b>, because of the ellipsis</td></tr>
+<tr><td><code>EnumLoadedPlugins()</code></td><td>List other loaded plugin modules via callback</td></tr></table>
+
+<pre><code>if (API.Revision() &gt;= 4) {
+	if (!API.IsUserFiltered("spammer"))
+		API.AddUserFilter("spammer", PluginAPI::True);   // True = persist the list
+	API.NotifyMsg(PluginAPI::Red, "spammer", "filtered (%d hits)", 3);  // printf-style, __cdecl
+	API.EnumLoadedPlugins();                              // results in EnumLoadedPluginsHook
+}</code></pre>
+
+<h3 id="version">BinaryChat Version / config API</h3>
+<p>Resolved with <code>GetProcAddress</code> from <code>BinaryChat.exe</code>, so it isn't tied to the plugin revision. Each wrapper returns a “troolean”: <code>TRUE</code> success, <code>FALSE</code> failure, <code>-1</code> export not found.</p>
+<table><tr><th>Method</th><th>Notes</th></tr>
+<tr><td><code>GetBotVersion(int32_t* Version, char* BuildTime, char* BuildDate, char* AuthBuildName)</code></td><td>Version and build strings</td></tr>
+<tr><td><code>GetBotVersionEx(…, int32_t* BuildNumber, void* Reserved)</code></td><td>Adds build number. The wrapper always passes <code>NULL</code> for <code>Reserved</code> and ignores your argument</td></tr>
+<tr><td><code>QueryConfigurationSetting(Setting, char* Profile, void* Buffer, uint32_t* BufferLength)</code></td><td>Read a setting for a profile (list below). <code>BufferLength</code> is in/out</td></tr></table>
+
+<pre><code>int32_t ver = 0;
+char buildTime[64]{}, buildDate[64]{}, authName[64]{};
+const auto r = API.GetBotVersion(&amp;ver, buildTime, buildDate, authName);
+if (r == -1)      { /* host doesn't export it */ }
+else if (r)       { /* ver and build strings are valid */ }
+
+char profile[] = "Default";           // profile name (assumed)
+char home[256]{};
+uint32_t len = sizeof(home);          // in: buffer size, out: bytes written
+if (API.QueryConfigurationSetting(BinaryChatAPI::Setup_Homechannel, profile, home, &amp;len) == PluginAPI::True)
+	API.WriteOutputString(home);</code></pre>
+
+<h2 id="config">ConfigurationSetting values</h2>
+<table><tr><th>#</th><th>Name</th><th>#</th><th>Name</th><th>#</th><th>Name</th></tr>
+<tr><td>0</td><td>Username</td><td>13</td><td>LOD_CDkey</td><td>26</td><td>WindowOptions</td></tr>
+<tr><td>1</td><td>Password</td><td>14</td><td>CDkeyName</td><td>27</td><td>ShowAdbanners</td></tr>
+<tr><td>2</td><td>LastPing</td><td>15</td><td>Spawn</td><td>28</td><td>WindowSize</td></tr>
+<tr><td>3</td><td>Master</td><td>16</td><td>Product</td><td>29</td><td>WindowXPos</td></tr>
+<tr><td>4</td><td>Operator</td><td>17</td><td>ShowEncryptErrors</td><td>30</td><td>WindowYPos</td></tr>
+<tr><td>5</td><td>IdleMessage</td><td>18</td><td>TelnetPort</td><td>31</td><td>Blank_Character</td></tr>
+<tr><td>6</td><td>Homechannel</td><td>19</td><td>TelnetPassword</td><td>32</td><td>BotNetServer</td></tr>
+<tr><td>7</td><td>Countidle</td><td>20</td><td>EnableRealm</td><td>33</td><td>BotNetServer_Pass</td></tr>
+<tr><td>8</td><td>Log</td><td>21</td><td>RealmCharacter</td><td>34</td><td>BotNetDatabaseId</td></tr>
+<tr><td>9</td><td>Timestamp</td><td>22</td><td>CharacterClass</td><td>35</td><td>ShowBotNetCmds</td></tr>
+<tr><td>10</td><td>UserNotifications</td><td>23</td><td>InteractiveRealm</td><td>36</td><td>ConnectBattleNet</td></tr>
+<tr><td>11</td><td>BattleNetServer</td><td>24</td><td>CharacterFlags</td><td></td><td></td></tr>
+<tr><td>12</td><td>CDkey</td><td>25</td><td>PingSpoof</td><td></td><td></td></tr></table>
+<p>All are in the <code>BinaryChatAPI</code> namespace with a <code>Setup_</code> prefix (e.g. <code>Setup_Homechannel</code>). Which type each returns (string vs integer) isn't stated in the headers.</p>
+
+<h2 id="types">Types &amp; enums</h2>
+<table><tr><th>Type</th><th>Values</th></tr>
+<tr><td><code>Bool32</code></td><td><code>int32_t</code>; <code>False = 0</code>, <code>True = 1</code></td></tr>
+<tr><td><code>ModuleHandle / WindowHandle / MenuHandle / EventHandle</code></td><td><code>void*</code> stand-ins for HINSTANCE / HWND / HMENU / HANDLE</td></tr>
+<tr><td><code>ConnectionInterface</code></td><td><code>Connection_BNCS, Connection_MCP, Connection_GS, Connection_Count</code></td></tr>
+<tr><td><code>ConnectionState</code></td><td><code>Connection_Closed, Connection_Opened</code></td></tr>
+<tr><td><code>OutputColor</code></td><td>White, Gray, Blue, Green, Red, Yellow, Purple, BlueGreen, MidBlue, DarkBlue, DarkGreen, DarkYellow, DarkRed, DarkPurple, LightBlue, <code>NumColors</code></td></tr>
+<tr><td><code>BinaryChatWindow</code></td><td>MainWindow, ChannelList, ChannelNameStatic, UserInput, ChatOutput, AccountManager, RealmManager, DownloadManager, NewsWindow, FiltersManager, ChannelsManager</td></tr>
+<tr><td><code>BinaryChatMenu</code></td><td><code>MainWindowMenu</code>, <code>ChannelUserPopupMenu</code> (actually the first submenu, not the parent)</td></tr>
+<tr><td><code>StateInformation</code></td><td><code>Size</code>, <code>ChannelName[256]</code>, <code>ChannelFlags</code>, <code>UniqueName[256]</code>, <code>AccountName[256]</code>, <code>Statstring[256]</code>, <code>State[Connection_Count]</code> (1044 bytes)</td></tr></table>
+
+<h2 id="structs">PluginInformation layout</h2>
+<p>Each revision derives from the previous, so a newer host's struct is a superset.</p>
+<table><tr><th>Struct</th><th>Adds</th></tr>
+<tr><td><code>PluginInformation</code> (rev 1)</td><td>12 API procs (<code>Net*</code>, <code>Sys*</code>, <code>UI*</code>), <code>BotNetClientInstance</code>, <code>BotNetConnection</code> (<code>BotNetConnectionState*</code>), the five hook/param pairs (writable), <code>PluginInstance</code>, <code>PluginEvent</code></td></tr>
+<tr><td><code>PluginInformation2</code></td><td><code>SysProcessBotCommand</code></td></tr>
+<tr><td><code>PluginInformation3</code></td><td><code>RegGetRegistryPath, NetResetAwayIdle, UIGetWindow, SysIsService, UIGetMenu</code></td></tr>
+<tr><td><code>PluginInformation4</code></td><td><code>Flt*</code> filter procs, <code>UINotifyMsg</code>, <code>SysEnumLoadedPlugins</code></td></tr></table>
+<p><code>BotNetClientInstance</code> and <code>BotNetConnection</code> are exposed by the struct, but the template doesn't use them.</p>
+
+<h2 id="abi">ABI guards</h2>
+<p><code>BCPlugin.h</code> uses <code>static_assert</code>s to keep layouts identical to the original Win32 header on both architectures.</p>
+<table><tr><th>Struct</th><th>x86</th><th>x64</th></tr>
+<tr><td><code>PluginInformation</code></td><td>108</td><td>216</td></tr><tr><td><code>PluginInformation2</code></td><td>112</td><td>224</td></tr>
+<tr><td><code>PluginInformation3</code></td><td>132</td><td>264</td></tr><tr><td><code>PluginInformation4</code></td><td>172</td><td>344</td></tr></table>
+<p>Also asserted: <code>Bool32</code> is 4 bytes, <code>intptr_t</code> is pointer-sized, all enums are 4 bytes, <code>StateInformation</code> is 1044 bytes.</p>
+
+<h2 id="gotchas">Gotchas</h2>
+<div class="note"><b>Revision gating.</b> Calling a rev 2–4 method on an older host dereferences null. Always check <code>API.Revision()</code> (or <code>m_X</code> where applicable).</div>
+<div class="note"><b>Version API returns -1</b> when the export is missing; treat it as three states, not a bool.</div>
+<div class="note"><b>Calling conventions.</b> Hooks and API procs are <code>__stdcall</code>; <code>NotifyMsg</code> is <code>__cdecl</code> variadic. On x86 a mismatch corrupts the stack.</div>
+<div class="note"><b>Enum callbacks need the instance in lParam.</b> The wrappers pass <code>&amp;PluginInstance</code> reinterpreted as <code>HookManager*</code>; this works because <code>Plugin</code> derives singly from <code>HookManager</code>.</div>
+<div class="note"><b>Disabled hooks aren't compiled or installed.</b> If you turn a hook on later, flip its macro in <code>PluginSettings.h</code>.</div>
+<div class="note"><b>Observed quirks in the template:</b> <code>GetBotVersionEx</code> ignores its <code>Reserved</code> argument; <code>QueueChatMessage</code> takes a mutable <code>char*</code>; the EnumChannelHook/Version proc fallbacks aren't null-guarded for rev 2–4 wrappers.</div>
+
+<h2 id="recipes">Ideas for what plugins can do</h2>
+<ul>
+<li><b>Custom chat commands</b>: <code>CommandHook</code> + <code>QueueChatMessage</code> / <code>WriteOutputString</code>.</li>
+<li><b>Packet sniffing and injection</b>: <code>SetMessage</code> + <code>MessageHook</code>, <code>SendConnectionMessage</code>.</li>
+<li><b>Periodic jobs</b>: <code>PluginTimer</code> (e.g. polling channel users with <code>QueryChannelInformation</code>).</li>
+<li><b>Cross-thread wakeups</b>: signal the <code>PluginEvent</code> handle to trigger <code>EventHook</code>.</li>
+<li><b>Connection supervision</b>: <code>ConnectionHook</code> to react to disconnects or reconnect logic.</li>
+<li><b>UI integration</b>: <code>GetWindow</code>, <code>GetMenu</code> to add menu items or subclass windows; <code>NotifyMsg</code> for colored notices.</li>
+<li><b>Moderation</b>: user/message filter add/remove/enumerate, with <code>IsUserFiltered</code> checks.</li>
+<li><b>Bot control</b>: <code>ProcessBotCommand</code>, <code>ResetAwayIdle</code>, <code>CloseConnection</code>.</li>
+<li><b>Config-aware plugins</b>: <code>QueryConfigurationSetting</code> plus <code>GetRegistryPath</code> for per-profile storage.</li>
+<li><b>Plugin cooperation</b>: <code>EnumLoadedPlugins</code>.</li>
+</ul>
+</main></body></html>
